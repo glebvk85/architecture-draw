@@ -32,7 +32,7 @@ type linkService struct {
 
 func main() {
 	log.Println("started...")
-	projectPath := "C:\\Users\\g.kucherenko\\git\\server\\Microservices" //os.Args[1]
+	projectPath := os.Args[1]
 	log.Printf("scanning '%s'\n", projectPath)
 
 	protoChan := make(chan string)
