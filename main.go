@@ -1,11 +1,16 @@
 package main
 
 import (
+	"encoding/xml"
 	"log"
+	"math"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jhump/protoreflect/desc/protoparse"
+	"github.com/pauloqueiroga/godraw"
 )
 
 type protoMethod struct {
@@ -43,16 +48,24 @@ func main() {
 		defer close(codeChan)
 		scanDirectory(projectPath, ".cs", codeChan)
 	}()
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			parseCode(methods, codeChan, linkChan)
+		}()
+	}
 	go func() {
-		defer close(linkChan)
-		parseCode(methods, codeChan, linkChan)
+		wg.Wait()
+		close(linkChan)
 	}()
 
 	//links := make([]linkInfo, 0, 0)
 	serviceLinks := make(map[linkService]map[string]struct{}, 0)
 	services := make(map[string]struct{}, 0)
 	for v := range linkChan {
-		log.Printf("OUTPUT: %v\n", v)
+		//log.Printf("OUTPUT: %v\n", v)
 		key := linkService{v.SourceServiceName, v.TargetServiceName}
 		_, exists := serviceLinks[key]
 		if !exists {
@@ -63,7 +76,8 @@ func main() {
 		services[v.SourceServiceName] = struct{}{}
 		services[v.TargetServiceName] = struct{}{}
 	}
-	log.Println(services)
+	//log.Println(serviceLinks)
+	drawDiagram(services, serviceLinks)
 }
 
 func scanDirectory(path string, ext string, output chan<- string) {
@@ -155,4 +169,41 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 		//fmt.Printf("%s: %s\n", v, namespace)
 		//log.Printf("CLIENTS: %v\n", clients)
 	}
+}
+
+func drawDiagram(services map[string]struct{}, links map[linkService]map[string]struct{}) {
+	g := godraw.NewGraph("1")
+
+	step := 2 * math.Pi / float64(len(services))
+	degree := 0.0
+	r := 450.0
+	for s := range services {
+		c := godraw.NewShape(s, "1")
+		x := 400.0 + r*math.Cos(degree)
+		y := 400.0 + r*math.Sin(degree)
+		degree += step
+		c.Geometry.X = int(x)
+		c.Geometry.Y = int(y)
+		c.Geometry.Height = "60"
+		c.Geometry.Width = "120"
+		c.Value = s
+		g.Add(c)
+	}
+
+	for s, v := range links {
+		c := godraw.NewShape(s.SourceServiceName+s.TargetServiceName, "1")
+		c.SourceID = s.SourceServiceName
+		c.TargetID = s.TargetServiceName
+		c.Edge = "1"
+		c.Geometry = &godraw.Geometry{Relative: "1", As: "geometry"}
+		c.Value = strconv.Itoa(len(v))
+		g.Add(c)
+	}
+
+	blob, err := xml.Marshal(g)
+	if err != nil {
+		log.Printf("Draw: %v", err)
+	}
+
+	_ = os.WriteFile("notes1.drawio", blob, 0644)
 }
