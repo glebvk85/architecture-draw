@@ -87,14 +87,14 @@ func main() {
 	}
 	//log.Println(serviceLinks)
 	if mode == "draw" {
-		drawDiagram("general", false, services, serviceLinks, func(s, t string) bool { return true })
+		drawDiagram("general", "", false, services, serviceLinks, func(s, t string) bool { return true })
 	} else if mode == "table" {
 		printTable(services, serviceLinks)
 	} else if mode == "draw-part" {
 		for srv := range services {
 			srv := srv
-			drawDiagram(srv+"-In", true, filterServices(srv, true, serviceLinks), serviceLinks, func(s, t string) bool { return t == srv })
-			drawDiagram(srv+"-Out", true, filterServices(srv, false, serviceLinks), serviceLinks, func(s, t string) bool { return s == srv })
+			drawDiagram(srv+"-In", srv, true, filterServices(srv, true, serviceLinks), serviceLinks, func(s, t string) bool { return t == srv })
+			drawDiagram(srv+"-Out", srv, true, filterServices(srv, false, serviceLinks), serviceLinks, func(s, t string) bool { return s == srv })
 		}
 	} else {
 		log.Println("Incorrect mode")
@@ -180,7 +180,11 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 			for c := range clients {
 				for _, m := range methods {
 					if strings.HasPrefix(w, c+m.MethodName+"(") || w == c+m.MethodName || strings.HasPrefix(w, c+m.MethodName+"Async(") || w == c+m.MethodName+"Async" {
-						output <- linkInfo{strings.Split(namespace, ".")[0], strings.Split(m.NamespaceName, ".")[1], m.MethodName}
+						sn := strings.Split(m.NamespaceName, ".")[1]
+						if sn == "Gateway" {
+							sn += ("." + strings.Split(m.NamespaceName, ".")[2])
+						}
+						output <- linkInfo{strings.Split(namespace, ".")[0], sn, m.MethodName}
 					}
 				}
 
@@ -192,21 +196,34 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 	}
 }
 
-func drawDiagram(fileName string, showMethods bool, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
+func drawDiagram(fileName string, centerService string, showMethods bool, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
 	g := godraw.NewGraph("1")
 
-	step := 2 * math.Pi / float64(len(services))
+	countServices := len(services)
+	if centerService != "" {
+		countServices--
+	}
+	step := 2 * math.Pi / float64(countServices)
 	degree := 0.0
-	r := 450.0
+	r := 550.0
+	x0 := 400.0
+	y0 := 400.0
 	for _, s := range getKeys(services) {
 		c := godraw.NewShape(s, "1")
-		x := 400.0 + r*math.Cos(degree)
-		y := 400.0 + r*math.Sin(degree)
-		degree += step
+		var x, y float64
+		if centerService == s {
+			x = x0
+			y = y0
+		} else {
+			x = x0 + r*math.Cos(degree)
+			y = y0 + r*math.Sin(degree)
+			degree += step
+		}
+
 		c.Geometry.X = int(x)
 		c.Geometry.Y = int(y)
 		c.Geometry.Height = "60"
-		c.Geometry.Width = "120"
+		c.Geometry.Width = "150"
 		c.Value = s
 		g.Add(c)
 	}
@@ -306,7 +323,7 @@ func formatMethods(m map[string]struct{}) string {
 		return keys[i] < keys[j]
 	})
 	for _, k := range keys {
-		sb.WriteString(k)
+		sb.WriteString(strings.Trim(k, "."))
 		sb.WriteString("\n")
 	}
 	return sb.String()
