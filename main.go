@@ -148,7 +148,7 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 		namespace := ""
 		clients := make(map[string]struct{}, 0)
 		for i, w := range words {
-			log.Println("word", w)
+			// log.Println("word", w)
 			w := strings.Trim(w, ";")
 			if w == "namespace" {
 				namespace = strings.Trim(words[i+1], ";")
