@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,8 @@ type linkService struct {
 	SourceServiceName string
 	TargetServiceName string
 }
+
+type filterLinks func(source, target string) bool
 
 func main() {
 	log.Println("started...")
@@ -84,9 +87,15 @@ func main() {
 	}
 	//log.Println(serviceLinks)
 	if mode == "draw" {
-		drawDiagram(services, serviceLinks)
+		drawDiagram("general", false, services, serviceLinks, func(s, t string) bool { return true })
 	} else if mode == "table" {
 		printTable(services, serviceLinks)
+	} else if mode == "draw-part" {
+		for srv := range services {
+			srv := srv
+			drawDiagram(srv+"-In", true, filterServices(srv, true, serviceLinks), serviceLinks, func(s, t string) bool { return t == srv })
+			drawDiagram(srv+"-Out", true, filterServices(srv, false, serviceLinks), serviceLinks, func(s, t string) bool { return s == srv })
+		}
 	} else {
 		log.Println("Incorrect mode")
 	}
@@ -163,6 +172,10 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 			}
 		}
 
+		if namespace == "" {
+			continue
+		}
+
 		for _, w := range words {
 			for c := range clients {
 				for _, m := range methods {
@@ -179,13 +192,13 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 	}
 }
 
-func drawDiagram(services map[string]struct{}, links map[linkService]map[string]struct{}) {
+func drawDiagram(fileName string, showMethods bool, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
 	g := godraw.NewGraph("1")
 
 	step := 2 * math.Pi / float64(len(services))
 	degree := 0.0
 	r := 450.0
-	for s := range services {
+	for _, s := range getKeys(services) {
 		c := godraw.NewShape(s, "1")
 		x := 400.0 + r*math.Cos(degree)
 		y := 400.0 + r*math.Sin(degree)
@@ -198,14 +211,26 @@ func drawDiagram(services map[string]struct{}, links map[linkService]map[string]
 		g.Add(c)
 	}
 
+	save := false
 	for s, v := range links {
+		if !needDraw(s.SourceServiceName, s.TargetServiceName) {
+			continue
+		}
+		save = true
 		c := godraw.NewShape(s.SourceServiceName+s.TargetServiceName, "1")
 		c.SourceID = s.SourceServiceName
 		c.TargetID = s.TargetServiceName
 		c.Edge = "1"
 		c.Geometry = &godraw.Geometry{Relative: "1", As: "geometry"}
-		c.Value = strconv.Itoa(len(v)) + ":\n"
+		if showMethods {
+			c.Value = formatMethods(v)
+		} else {
+			c.Value = strconv.Itoa(len(v))
+		}
 		g.Add(c)
+	}
+	if !save {
+		return
 	}
 
 	blob, err := xml.Marshal(g)
@@ -213,7 +238,7 @@ func drawDiagram(services map[string]struct{}, links map[linkService]map[string]
 		log.Printf("Draw: %v", err)
 	}
 
-	_ = os.WriteFile("notes1.drawio", blob, 0644)
+	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
 }
 
 func printTable(services map[string]struct{}, links map[linkService]map[string]struct{}) {
@@ -252,8 +277,8 @@ func extractWords(content string) []string {
 	content = strings.ReplaceAll(sb.String(), "\t", " ")
 	content = strings.ReplaceAll(content, "\r\n", "")
 	content = strings.ReplaceAll(content, ";", " ")
-	content = strings.ReplaceAll(content, "{", " ")
-	content = strings.ReplaceAll(content, "}", " ")
+	content = strings.ReplaceAll(content, "{", " { ")
+	content = strings.ReplaceAll(content, "}", " } ")
 	s := strings.Split(content, " ")
 	for _, w := range s {
 		if strings.Trim(w, " ") != "" {
@@ -261,4 +286,46 @@ func extractWords(content string) []string {
 		}
 	}
 	return r
+}
+
+func getKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func formatMethods(m map[string]struct{}) string {
+	var sb strings.Builder
+	keys := getKeys(m)
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	for _, k := range keys {
+		sb.WriteString(k)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func filterServices(service string, incoming bool, links map[linkService]map[string]struct{}) map[string]struct{} {
+	es := make(map[string]struct{})
+	for k := range links {
+		if incoming {
+			if service != k.TargetServiceName {
+				continue
+			}
+		} else {
+			if service != k.SourceServiceName {
+				continue
+			}
+		}
+		es[k.SourceServiceName] = struct{}{}
+		es[k.TargetServiceName] = struct{}{}
+	}
+	return es
 }
