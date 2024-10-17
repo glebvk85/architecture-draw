@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"fmt"
 	"log"
 	"math"
 	"os"
@@ -84,6 +85,8 @@ func main() {
 	//log.Println(serviceLinks)
 	if mode == "draw" {
 		drawDiagram(services, serviceLinks)
+	} else if mode == "table" {
+		printTable(services, serviceLinks)
 	} else {
 		log.Println("Incorrect mode")
 	}
@@ -134,22 +137,18 @@ func parseProto(input <-chan string) []protoMethod {
 
 func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInfo) {
 	for v := range input {
-		//if !strings.Contains(v, "C:\\Users\\g.kucherenko\\git\\server\\Microservices\\ServerSearchService\\ServerSearchService.Daemon\\Providers\\GameServiceProvider.cs") {
-		//	continue
-		//}
 		b, err := os.ReadFile(v)
 		if err != nil {
 			log.Printf("Failed to open code file: %v\n", err)
 		}
 		content := string(b)
-		//log.Println(content)
-		content = strings.ReplaceAll(content, "\r\n", " ")
-		content = strings.ReplaceAll(content, "\t", " ")
-		words := strings.Split(content, " ")
+		// log.Println(content)
+		words := extractWords(content)
 
 		namespace := ""
 		clients := make(map[string]struct{}, 0)
 		for i, w := range words {
+			log.Println("word", w)
 			w := strings.Trim(w, ";")
 			if w == "namespace" {
 				namespace = strings.Trim(words[i+1], ";")
@@ -158,7 +157,7 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 			for _, pw := range partWords {
 				for _, m := range methods {
 					if m.ServiceName == pw {
-						clients[strings.Trim(words[i+1], ";")] = struct{}{}
+						clients[strings.Trim(strings.Trim(words[i+1], ";"), ",")] = struct{}{}
 					}
 				}
 			}
@@ -175,8 +174,8 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 			}
 		}
 
-		//fmt.Printf("%s: %s\n", v, namespace)
-		//log.Printf("CLIENTS: %v\n", clients)
+		// fmt.Printf("%s: %s\n", v, namespace)
+		// log.Printf("CLIENTS: %v\n", clients)
 	}
 }
 
@@ -215,4 +214,51 @@ func drawDiagram(services map[string]struct{}, links map[linkService]map[string]
 	}
 
 	_ = os.WriteFile("notes1.drawio", blob, 0644)
+}
+
+func printTable(services map[string]struct{}, links map[linkService]map[string]struct{}) {
+	f, err := os.Create("test.csv")
+	if err != nil {
+		log.Printf("Print: %v", err)
+		return
+	}
+
+	for s := range services {
+		f.WriteString(fmt.Sprintf("%s\t\t\n", s))
+		for l, v := range links {
+			if s == l.SourceServiceName {
+				f.WriteString(fmt.Sprintf("%30s\t%s\t\n", " ", l.TargetServiceName))
+				for m := range v {
+					f.WriteString(fmt.Sprintf("%30s\t%30s\t%s\n", " ", " ", m))
+				}
+			}
+		}
+	}
+
+	err = f.Close()
+	if err != nil {
+		log.Printf("Print: %v", err)
+		return
+	}
+}
+
+func extractWords(content string) []string {
+	var r []string
+	lines := strings.Split(content, "\r\n")
+	var sb strings.Builder
+	for _, str := range lines {
+		sb.WriteString(strings.Trim(str, " "))
+	}
+	content = strings.ReplaceAll(sb.String(), "\t", " ")
+	content = strings.ReplaceAll(content, "\r\n", "")
+	content = strings.ReplaceAll(content, ";", " ")
+	content = strings.ReplaceAll(content, "{", " ")
+	content = strings.ReplaceAll(content, "}", " ")
+	s := strings.Split(content, " ")
+	for _, w := range s {
+		if strings.Trim(w, " ") != "" {
+			r = append(r, w)
+		}
+	}
+	return r
 }
