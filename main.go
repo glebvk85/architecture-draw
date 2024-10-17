@@ -40,34 +40,47 @@ func main() {
 	projectPaths := os.Args[2:]
 
 	protoChan := make(chan string)
+	var wgProto sync.WaitGroup
 	for _, p := range projectPaths {
 		log.Printf("scanning '%s'\n", p)
+		wgProto.Add(1)
 		go func() {
-			defer close(protoChan)
+			defer wgProto.Done()
 			scanDirectory(p, ".proto", protoChan)
 		}()
 	}
+	go func() {
+		defer close(protoChan)
+		wgProto.Wait()
+	}()
 	methods := parseProto(protoChan)
 
 	codeChan := make(chan string)
 	linkChan := make(chan linkInfo)
+	var wgCode sync.WaitGroup
 	for _, p := range projectPaths {
+		wgCode.Add(1)
 		go func() {
-			defer close(codeChan)
+			defer wgCode.Done()
 			scanDirectory(p, ".cs", codeChan)
 		}()
 	}
-	var wg sync.WaitGroup
+	go func() {
+		defer close(codeChan)
+		wgCode.Wait()
+	}()
+
+	var wgParse sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
+		wgParse.Add(1)
 		go func() {
-			defer wg.Done()
+			defer wgParse.Done()
 			parseCode(methods, codeChan, linkChan)
 		}()
 	}
 	go func() {
-		wg.Wait()
-		close(linkChan)
+		defer close(linkChan)
+		wgParse.Wait()
 	}()
 
 	//links := make([]linkInfo, 0, 0)
@@ -180,11 +193,11 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 			for c := range clients {
 				for _, m := range methods {
 					if strings.HasPrefix(w, c+m.MethodName+"(") || w == c+m.MethodName || strings.HasPrefix(w, c+m.MethodName+"Async(") || w == c+m.MethodName+"Async" {
-						sn := strings.Split(m.NamespaceName, ".")[1]
+						sn := strings.Split(namespace, ".")[0]
 						if sn == "Gateway" {
-							sn += ("." + strings.Split(m.NamespaceName, ".")[2])
+							sn += ("." + strings.Split(namespace, ".")[1])
 						}
-						output <- linkInfo{strings.Split(namespace, ".")[0], sn, m.MethodName}
+						output <- linkInfo{sn, strings.Split(m.NamespaceName, ".")[1], m.MethodName}
 					}
 				}
 
