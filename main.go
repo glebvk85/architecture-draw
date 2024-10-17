@@ -32,22 +32,27 @@ type linkService struct {
 
 func main() {
 	log.Println("started...")
-	projectPath := os.Args[1]
-	log.Printf("scanning '%s'\n", projectPath)
+	mode := os.Args[1]
+	projectPaths := os.Args[2:]
 
 	protoChan := make(chan string)
-	go func() {
-		defer close(protoChan)
-		scanDirectory(projectPath, ".proto", protoChan)
-	}()
+	for _, p := range projectPaths {
+		log.Printf("scanning '%s'\n", p)
+		go func() {
+			defer close(protoChan)
+			scanDirectory(p, ".proto", protoChan)
+		}()
+	}
 	methods := parseProto(protoChan)
 
 	codeChan := make(chan string)
 	linkChan := make(chan linkInfo)
-	go func() {
-		defer close(codeChan)
-		scanDirectory(projectPath, ".cs", codeChan)
-	}()
+	for _, p := range projectPaths {
+		go func() {
+			defer close(codeChan)
+			scanDirectory(p, ".cs", codeChan)
+		}()
+	}
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(1)
@@ -77,7 +82,11 @@ func main() {
 		services[v.TargetServiceName] = struct{}{}
 	}
 	//log.Println(serviceLinks)
-	drawDiagram(services, serviceLinks)
+	if mode == "draw" {
+		drawDiagram(services, serviceLinks)
+	} else {
+		log.Println("Incorrect mode")
+	}
 }
 
 func scanDirectory(path string, ext string, output chan<- string) {
@@ -196,7 +205,7 @@ func drawDiagram(services map[string]struct{}, links map[linkService]map[string]
 		c.TargetID = s.TargetServiceName
 		c.Edge = "1"
 		c.Geometry = &godraw.Geometry{Relative: "1", As: "geometry"}
-		c.Value = strconv.Itoa(len(v))
+		c.Value = strconv.Itoa(len(v)) + ":\n"
 		g.Add(c)
 	}
 
