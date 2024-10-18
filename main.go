@@ -100,14 +100,15 @@ func main() {
 	}
 	//log.Println(serviceLinks)
 	if mode == "draw" {
-		drawDiagram("general", "", false, services, serviceLinks, func(s, t string) bool { return true })
+		drawDiagram("general", services, serviceLinks)
 	} else if mode == "table" {
 		printTable(services, serviceLinks)
 	} else if mode == "draw-part" {
 		for srv := range services {
 			srv := srv
-			drawDiagram(srv+"-In", srv, true, filterServices(srv, true, serviceLinks), serviceLinks, func(s, t string) bool { return t == srv })
-			drawDiagram(srv+"-Out", srv, true, filterServices(srv, false, serviceLinks), serviceLinks, func(s, t string) bool { return s == srv })
+			drawPartDiagram(srv+"-In", srv, filterServices(srv, true, serviceLinks), serviceLinks, func(s, t string) bool { return t == srv })
+			drawPartDiagram(srv+"-Out", srv, filterServices(srv, false, serviceLinks), serviceLinks, func(s, t string) bool { return s == srv })
+			drawPartInOutDiagram(srv+"-InOut", srv, serviceLinks)
 		}
 	} else {
 		log.Println("Incorrect mode")
@@ -209,9 +210,71 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 	}
 }
 
-func drawDiagram(fileName string, centerService string, showMethods bool, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
+func drawDiagram(fileName string, services map[string]struct{}, links map[linkService]map[string]struct{}) {
 	g := godraw.NewGraph("1")
+	drawServices(&g, "", services)
+	if !drawLinks(&g, "", "", links, false, func(s, t string) bool { return true }) {
+		return
+	}
 
+	blob, err := xml.Marshal(g)
+	if err != nil {
+		log.Printf("Draw: %v", err)
+	}
+
+	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
+}
+
+func drawPartDiagram(fileName string, centerService string, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
+	g := godraw.NewGraph("1")
+	drawServices(&g, centerService, services)
+	if !drawLinks(&g, "", "", links, true, needDraw) {
+		return
+	}
+
+	blob, err := xml.Marshal(g)
+	if err != nil {
+		log.Printf("Draw: %v", err)
+	}
+
+	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
+}
+
+func drawPartInOutDiagram(fileName string, centerService string, links map[linkService]map[string]struct{}) {
+	g := godraw.NewGraph("1")
+	services := make(map[string]struct{})
+	servicesIn := filterServices(centerService, true, links)
+	for k := range servicesIn {
+		name := k
+		if k != centerService {
+			name += "<"
+		}
+		services[name] = struct{}{}
+	}
+	servicesOut := filterServices(centerService, false, links)
+	for k := range servicesOut {
+		name := k
+		if k != centerService {
+			name += ">"
+		}
+		services[name] = struct{}{}
+	}
+	drawServices(&g, centerService, services)
+	drawedFirst := drawLinks(&g, "<", "", links, true, func(s, t string) bool { return t == centerService })
+	drawedSecond := drawLinks(&g, "", ">", links, true, func(s, t string) bool { return s == centerService })
+	if !drawedFirst && !drawedSecond {
+		return
+	}
+
+	blob, err := xml.Marshal(g)
+	if err != nil {
+		log.Printf("Draw: %v", err)
+	}
+
+	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
+}
+
+func drawServices(g *godraw.GraphModel, centerService string, services map[string]struct{}) {
 	countServices := len(services)
 	if centerService != "" {
 		countServices--
@@ -237,10 +300,12 @@ func drawDiagram(fileName string, centerService string, showMethods bool, servic
 		c.Geometry.Y = int(y)
 		c.Geometry.Height = "60"
 		c.Geometry.Width = "150"
-		c.Value = s
+		c.Value = strings.TrimRight(strings.TrimRight(s, ">"), "<")
 		g.Add(c)
 	}
+}
 
+func drawLinks(g *godraw.GraphModel, sourceSuffixId string, targetSuffixId string, links map[linkService]map[string]struct{}, showMethods bool, needDraw filterLinks) bool {
 	save := false
 	for s, v := range links {
 		if !needDraw(s.SourceServiceName, s.TargetServiceName) {
@@ -248,8 +313,8 @@ func drawDiagram(fileName string, centerService string, showMethods bool, servic
 		}
 		save = true
 		c := godraw.NewShape(s.SourceServiceName+s.TargetServiceName, "1")
-		c.SourceID = s.SourceServiceName
-		c.TargetID = s.TargetServiceName
+		c.SourceID = s.SourceServiceName + sourceSuffixId
+		c.TargetID = s.TargetServiceName + targetSuffixId
 		c.Edge = "1"
 		c.Geometry = &godraw.Geometry{Relative: "1", As: "geometry"}
 		if showMethods {
@@ -259,16 +324,7 @@ func drawDiagram(fileName string, centerService string, showMethods bool, servic
 		}
 		g.Add(c)
 	}
-	if !save {
-		return
-	}
-
-	blob, err := xml.Marshal(g)
-	if err != nil {
-		log.Printf("Draw: %v", err)
-	}
-
-	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
+	return save
 }
 
 func printTable(services map[string]struct{}, links map[linkService]map[string]struct{}) {
@@ -342,10 +398,10 @@ func formatMethods(m map[string]struct{}) string {
 	return sb.String()
 }
 
-func filterServices(service string, incoming bool, links map[linkService]map[string]struct{}) map[string]struct{} {
+func filterServices(service string, isTarget bool, links map[linkService]map[string]struct{}) map[string]struct{} {
 	es := make(map[string]struct{})
 	for k := range links {
-		if incoming {
+		if isTarget {
 			if service != k.TargetServiceName {
 				continue
 			}
