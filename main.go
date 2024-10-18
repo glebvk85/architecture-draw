@@ -218,7 +218,7 @@ func drawDiagram(fileName string, centerService string, showMethods bool, servic
 	}
 	step := 2 * math.Pi / float64(countServices)
 	degree := 0.0
-	r := 550.0
+	r := 400.0
 	x0 := 400.0
 	y0 := 400.0
 	for _, s := range getKeys(services) {
