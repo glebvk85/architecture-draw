@@ -212,7 +212,7 @@ func parseCode(methods []protoMethod, input <-chan string, output chan<- linkInf
 
 func drawDiagram(fileName string, services map[string]struct{}, links map[linkService]map[string]struct{}) {
 	g := godraw.NewGraph("1")
-	drawServices(&g, "", services)
+	drawServices(&g, "", getKeys(services))
 	if !drawLinks(&g, "", "", links, false, func(s, t string) bool { return true }) {
 		return
 	}
@@ -227,7 +227,7 @@ func drawDiagram(fileName string, services map[string]struct{}, links map[linkSe
 
 func drawPartDiagram(fileName string, centerService string, services map[string]struct{}, links map[linkService]map[string]struct{}, needDraw filterLinks) {
 	g := godraw.NewGraph("1")
-	drawServices(&g, centerService, services)
+	drawServices(&g, centerService, getKeys(services))
 	if !drawLinks(&g, "", "", links, true, needDraw) {
 		return
 	}
@@ -242,23 +242,24 @@ func drawPartDiagram(fileName string, centerService string, services map[string]
 
 func drawPartInOutDiagram(fileName string, centerService string, links map[linkService]map[string]struct{}) {
 	g := godraw.NewGraph("1")
-	services := make(map[string]struct{})
+	services := make([]string, 0)
+	services = append(services, centerService)
 	servicesIn := filterServices(centerService, true, links)
-	for k := range servicesIn {
-		name := k
-		if k != centerService {
-			name += "<"
+	for _, k := range getKeys(servicesIn) {
+		if k == centerService {
+			continue
 		}
-		services[name] = struct{}{}
+		services = append(services, k+"<")
 	}
+	services = append(services, "")
 	servicesOut := filterServices(centerService, false, links)
-	for k := range servicesOut {
-		name := k
-		if k != centerService {
-			name += ">"
+	for _, k := range getKeys(servicesOut) {
+		if k == centerService {
+			continue
 		}
-		services[name] = struct{}{}
+		services = append(services, k+">")
 	}
+	services = append(services, "")
 	drawServices(&g, centerService, services)
 	drawedFirst := drawLinks(&g, "<", "", links, true, func(s, t string) bool { return t == centerService })
 	drawedSecond := drawLinks(&g, "", ">", links, true, func(s, t string) bool { return s == centerService })
@@ -274,17 +275,21 @@ func drawPartInOutDiagram(fileName string, centerService string, links map[linkS
 	_ = os.WriteFile(fmt.Sprintf("%s.drawio", fileName), blob, 0644)
 }
 
-func drawServices(g *godraw.GraphModel, centerService string, services map[string]struct{}) {
+func drawServices(g *godraw.GraphModel, centerService string, services []string) {
 	countServices := len(services)
 	if centerService != "" {
 		countServices--
 	}
-	step := 2 * math.Pi / float64(countServices)
-	degree := 0.0
+	step := -2 * math.Pi / float64(countServices)
+	degree := -math.Pi / 2
 	r := 400.0
 	x0 := 400.0
 	y0 := 400.0
-	for _, s := range getKeys(services) {
+	for _, s := range services {
+		if s == "" {
+			degree += step
+			continue
+		}
 		c := godraw.NewShape(s, "1")
 		var x, y float64
 		if centerService == s {
