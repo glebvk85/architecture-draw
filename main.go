@@ -251,15 +251,19 @@ func drawPartInOutDiagram(fileName string, centerService string, links map[linkS
 		}
 		services = append(services, k+"<")
 	}
-	services = append(services, "")
 	servicesOut := filterServices(centerService, false, links)
+	if len(servicesIn) > 0 && len(servicesOut) > 0 {
+		services = append(services, "")
+	}
 	for _, k := range getKeys(servicesOut) {
 		if k == centerService {
 			continue
 		}
 		services = append(services, k+">")
 	}
-	services = append(services, "")
+	if len(servicesIn) > 0 && len(servicesOut) > 0 {
+		services = append(services, "")
+	}
 	drawServices(&g, centerService, services)
 	drawedFirst := drawLinks(&g, "<", "", links, true, func(s, t string) bool { return t == centerService })
 	drawedSecond := drawLinks(&g, "", ">", links, true, func(s, t string) bool { return s == centerService })
